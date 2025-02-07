@@ -42,6 +42,7 @@ def generate_referral_code():
 async def start(update: Update, context: CallbackContext):
   telegram_id = update.message.chat_id
   username = update.message.chat.username or "Unknown"
+  logger.info(f"Received /start command from {username}")
 
   # Check if user exists
   response = supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
