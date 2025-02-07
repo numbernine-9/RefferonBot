@@ -40,46 +40,51 @@ def generate_referral_code():
 
 # Start Command
 async def start(update: Update, context: CallbackContext):
-  telegram_id = update.message.chat_id
-  username = update.message.chat.username or "Unknown"
-  logger.info(f"Received /start command from {username}")
+  try:
+    telegram_id = update.message.chat_id
+    username = update.message.chat.username or "Unknown"
+    logger.info(f"Received /start command from {username}")
 
-  # Check if user exists
-  response = supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
-  if response.data:
-    user = response.data[0]
-    referral_code = user["referral_code"]
-  else:
-    # Handle referral if a code is provided
-    referral_code = generate_referral_code()
-    referred_by_code = context.args[0] if context.args else None
+    # Check if user exists
+    response = supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
+    if response.data:
+      user = response.data[0]
+      referral_code = user["referral_code"]
+    else:
+      # Handle referral if a code is provided
+      referral_code = generate_referral_code()
+      referred_by_code = context.args[0] if context.args else None
 
-    if referred_by_code:
-      # Get referrer
-      referrer_response = supabase.table("user_profiles").select("*").eq("referral_code", referred_by_code).execute()
-      if not referrer_response.data:
-        await update.message.reply_text("Invalid referral code.")
-        return
+      if referred_by_code:
+        # Get referrer
+        referrer_response = supabase.table("user_profiles").select("*").eq("referral_code", referred_by_code).execute()
+        if not referrer_response.data:
+          await update.message.reply_text("Invalid referral code.")
+          return
 
-      referrer = referrer_response.data[0]
+        referrer = referrer_response.data[0]
 
-      # Update referrer’s referral count and points
-      supabase.table("user_profiles").update({
-        "referrals": referrer["referrals"] + 1,
-        "points": referrer["points"] + 10  # 10 points per referral
-      }).eq("telegram_id", referrer["telegram_id"]).execute()
+        # Update referrer’s referral count and points
+        supabase.table("user_profiles").update({
+          "referrals": referrer["referrals"] + 1,
+          "points": referrer["points"] + 10  # 10 points per referral
+        }).eq("telegram_id", referrer["telegram_id"]).execute()
 
-    # Create new user entry
-    supabase.table("user_profiles").insert({
-      "telegram_id": telegram_id,
-      "username": username,
-      "referral_code": referral_code,
-      "referred_by": referred_by_code
-    }).execute()
+      # Create new user entry
+      supabase.table("user_profiles").insert({
+        "telegram_id": telegram_id,
+        "username": username,
+        "referral_code": referral_code,
+        "referred_by": referred_by_code
+      }).execute()
 
-  # Send welcome message with referral link
-  ref_link = f"https://t.me/{context.bot.username}?start={referral_code}"
-  await update.message.reply_text(f"Welcome {username}! 🎉\nYour referral link: {ref_link}")
+    # Send welcome message with referral link
+    ref_link = f"https://t.me/{context.bot.username}?start={referral_code}"
+    await update.message.reply_text(f"Welcome {username}! 🎉\nYour referral link: {ref_link}")
+  except Exception as e:
+    logger.error(f"Error in start command: {str(e)}")
+    logger.error(traceback.format_exc())
+    await update.message.reply_text("An error occurred. Please try again later.")
 
 # Handle Sending Referral Link Once Per Day
 async def send_link(update: Update, context: CallbackContext):
@@ -267,14 +272,15 @@ def create_app():
       try:
         success = loop.run_until_complete(process_update())
         if success:
-            return Response("OK", status=200)
+          return Response("OK", status=200)
         else:
-            return Response("Failed to process update", status=500)
+          return Response("Failed to process update", status=500)
       except Exception as e:
         logger.error(f"Error in event loop: {e}")
         logger.error(traceback.format_exc())
         return Response(f"Error in event loop: {str(e)}", status=500)
       finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
 
     except Exception as e:
