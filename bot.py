@@ -1,5 +1,4 @@
 import os
-import asyncio
 import random
 import string
 from datetime import datetime, timezone
@@ -8,12 +7,16 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackContext
 from supabase import create_client, Client
 
+# Load Environment Variables
 load_dotenv()
 
-# Load Environment Variables
+# Validate Environment Variables
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+if not all([SUPABASE_URL, SUPABASE_KEY, TELEGRAM_BOT_TOKEN]):
+  raise ValueError("Missing required environment variables. Check your .env file.")
 
 # Initialize Supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -33,38 +36,26 @@ async def start(update: Update, context: CallbackContext):
     user = response.data[0]
     referral_code = user["referral_code"]
   else:
+    # Handle referral if a code is provided
     referral_code = generate_referral_code()
-    supabase.table("user_profiles").insert({"telegram_id": telegram_id, "username": username, "referral_code": referral_code}).execute()
+    referred_by_code = context.args[0] if context.args else None
 
-  # Send welcome message with referral link
-  ref_link = f"https://t.me/{context.bot.username}?start={referral_code}"
-  await update.message.reply_text(f"Welcome {username}! 🎉\nYour referral link: {ref_link}")
+    if referred_by_code:
+        # Get referrer
+        referrer_response = supabase.table("user_profiles").select("*").eq("referral_code", referred_by_code).execute()
+        if not referrer_response.data:
+            await update.message.reply_text("Invalid referral code.")
+            return
 
-# Handle Referrals
-async def handle_referral(update: Update, context: CallbackContext):
-  args = context.args
-  telegram_id = update.message.chat_id
-  username = update.message.chat.username or "Unknown"
+        referrer = referrer_response.data[0]
 
-  if args:
-    referred_by_code = args[0]
-
-    # Check if user already exists
-    response = supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
-    if response.data:
-      await update.message.reply_text("You're already registered!")
-      return
-
-    # Get referrer
-    referrer_response = supabase.table("user_profiles").select("*").eq("referral_code", referred_by_code).execute()
-    if not referrer_response.data:
-      await update.message.reply_text("Invalid referral code.")
-      return
-
-    referrer = referrer_response.data[0]
+        # Update referrer’s referral count and points
+        supabase.table("user_profiles").update({
+            "referrals": referrer["referrals"] + 1,
+            "points": referrer["points"] + 10  # 10 points per referral
+        }).eq("telegram_id", referrer["telegram_id"]).execute()
 
     # Create new user entry
-    referral_code = generate_referral_code()
     supabase.table("user_profiles").insert({
         "telegram_id": telegram_id,
         "username": username,
@@ -72,16 +63,9 @@ async def handle_referral(update: Update, context: CallbackContext):
         "referred_by": referred_by_code
     }).execute()
 
-    # Update referrer’s referral count and points
-    supabase.table("user_profiles").update({
-        "referrals": referrer["referrals"] + 1,
-        "points": referrer["points"] + 10  # 10 points per referral
-    }).eq("telegram_id", referrer["telegram_id"]).execute()
-
-    await update.message.reply_text("You have been registered successfully! ✅")
-    await context.bot.send_message(referrer["telegram_id"], f"🎉 You got a referral! Your new referral count: {referrer['referrals']}, Points: {referrer['points']}")
-  else:
-    await update.message.reply_text("Welcome! Use your referral link to invite friends. 😊")
+  # Send welcome message with referral link
+  ref_link = f"https://t.me/{context.bot.username}?start={referral_code}"
+  await update.message.reply_text(f"Welcome {username}! 🎉\nYour referral link: {ref_link}")
 
 # Handle Sending Referral Link Once Per Day
 async def send_link(update: Update, context: CallbackContext):
@@ -103,7 +87,6 @@ async def send_link(update: Update, context: CallbackContext):
 
   # Check if user already sent a link today
   today = datetime.now(timezone.utc).date()
-
   check_response = supabase.table("referral_links").select("*").eq("user_id", user_id).gte("created_at", str(today)).execute()
   if check_response.data:
     await update.message.reply_text("You can only send one referral link per day!")
@@ -158,16 +141,27 @@ async def redeem(update: Update, context: CallbackContext):
   supabase.table("user_profiles").update({"points": user["points"] - 50}).eq("telegram_id", telegram_id).execute()
   await update.message.reply_text("🎁 You have successfully redeemed a reward! Your points are now updated.")
 
+# Error Handler
+async def error_handler(update: Update, context: CallbackContext):
+  print(f"Error: {context.error}")
+  if update.message:
+    await update.message.reply_text("An error occurred. Please try again later.")
+
 # Main Function to Run the Bot
 def main():
+  # Initialize the bot
   app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+  # Add command handlers
   app.add_handler(CommandHandler("start", start))
-  app.add_handler(CommandHandler("start", handle_referral))
   app.add_handler(CommandHandler("leaderboard", leaderboard))
   app.add_handler(CommandHandler("redeem", redeem))
-  app.add_handler(CommandHandler("sendlink", send_link, block=False))
+  app.add_handler(CommandHandler("sendlink", send_link))
 
+  # Add error handler
+  app.add_error_handler(error_handler)
+
+  # Run the bot
   print("Bot is running...")
   app.run_polling()
 
