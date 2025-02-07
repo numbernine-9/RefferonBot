@@ -253,17 +253,29 @@ def create_app():
       update = Update.de_json(update_data, application.bot)
 
       async def process_update():
-        await application.process_update(update)
-
-        # Create new event loop for processing update
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(process_update())
-        finally:
-            loop.close()
+          await application.process_update(update)
+          return True
+        except Exception as e:
+          logger.error(f"Error in process_update: {e}")
+          logger.error(traceback.format_exc())
+          return False
 
-        return Response(status=200)
+      # Create new event loop for processing update
+      loop = asyncio.new_event_loop()
+      asyncio.set_event_loop(loop)
+      try:
+        success = loop.run_until_complete(process_update())
+        if success:
+            return Response("OK", status=200)
+        else:
+            return Response("Failed to process update", status=500)
+      except Exception as e:
+        logger.error(f"Error in event loop: {e}")
+        logger.error(traceback.format_exc())
+        return Response(f"Error in event loop: {str(e)}", status=500)
+      finally:
+        loop.close()
 
     except Exception as e:
       logger.error(f"Webhook processing error: {e}")
