@@ -167,6 +167,8 @@ def create_app():
   @app.route("/webhook", methods=["POST"])
   async def webhook():
     try:
+      # Log the incoming request
+      print("✅ Webhook called:", request.get_json())
       update = Update.de_json(request.get_json(force=True), application.bot)
       await application.process_update(update)
       return Response(status=200)
