@@ -3,6 +3,7 @@ import asyncio
 import random
 import string
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackContext
 from supabase import create_client, Client
@@ -159,7 +160,7 @@ async def redeem(update: Update, context: CallbackContext):
 
 # Main Function to Run the Bot
 def main():
-  app = Application.builder().token(BOT_TOKEN).build()
+  app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
   app.add_handler(CommandHandler("start", start))
   app.add_handler(CommandHandler("start", handle_referral))
