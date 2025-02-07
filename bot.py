@@ -5,6 +5,7 @@ from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
 import traceback
+import asyncio
 
 # Load Environment Variables
 load_dotenv()
@@ -163,23 +164,25 @@ def create_app():
   # Add error handler
   application.add_error_handler(error_handler)
 
+  # Initialize the bot before processing updates
+  async def initialize_bot():
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()  # Ensure bot is ready
+
+  asyncio.run(initialize_bot())
+
+
   # Set up webhook route
   @app.route("/webhook", methods=["POST"])
-  async def webhook():
-    try:
-      # Log the incoming request
-      print("✅ Webhook called:", request.get_json())
-      update = Update.de_json(request.get_json(force=True), application.bot)
-      await application.process_update(update)
-      return Response(status=200)
-    except Exception as e:
-      print("❌ Error in webhook:", str(e))
-      traceback.print_exc()
-      return Response("Internal Server Error", status=500)
+  def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    application.create_task(application.process_update(update))  # Async handling
+    return Response(status=200)
 
   # Set webhook URL
   webhook_url = "https://refferonbot.onrender.com/webhook"
-  application.bot.set_webhook(webhook_url)
+  asyncio.run(application.bot.set_webhook(webhook_url))
 
   print("Bot is running with webhooks...")
   return app
