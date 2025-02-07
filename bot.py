@@ -170,8 +170,8 @@ def create_app():
     await application.start()
     await application.updater.start_polling()  # Ensure bot is ready
 
-  asyncio.run(initialize_bot())
-
+  loop = asyncio.get_event_loop()
+  loop.create_task(initialize_bot())
 
   # Set up webhook route
   @app.route("/webhook", methods=["POST"])
@@ -180,9 +180,12 @@ def create_app():
     application.create_task(application.process_update(update))  # Async handling
     return Response(status=200)
 
-  # Set webhook URL
-  webhook_url = "https://refferonbot.onrender.com/webhook"
-  asyncio.run(application.bot.set_webhook(webhook_url))
+  # Set webhook URL in an async-safe way
+  async def set_webhook():
+    webhook_url = "https://refferonbot.onrender.com/webhook"
+    await application.bot.set_webhook(webhook_url)
+
+  loop.create_task(set_webhook()) #schedule the webhook setup
 
   print("Bot is running with webhooks...")
   return app
