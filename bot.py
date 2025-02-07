@@ -187,6 +187,10 @@ async def initialize_bot():
         .build()
     )
 
+    # Initialize and start the application
+    await application.initialize()
+    await application.start()
+
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("leaderboard", leaderboard))
@@ -202,7 +206,6 @@ async def initialize_bot():
 
     response = await application.bot.set_webhook(webhook_url)
     logger.info(f"Webhook set response: {response}")
-
 
     return application
   except Exception as e:
@@ -224,6 +227,9 @@ def create_app():
   except Exception as e:
     print(f"Failed to initialize Telegram application: {e}")
     raise
+  finally:
+    loop.close()
+
 
   @app.route("/webhook", methods=["POST"])
   def webhook():
@@ -246,29 +252,30 @@ def create_app():
       # Create update object
       update = Update.de_json(update_data, application.bot)
 
-      # Synchronous processing wrapper
-      def sync_process_update():
+      async def process_update():
+        await application.process_update(update)
+
+        # Create new event loop for processing update
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-          loop.run_until_complete(application.process_update(update))
-        except Exception as e:
-          logger.error(f"Error processing update: {e}")
-          logger.error(traceback.format_exc())
-          raise
+            loop.run_until_complete(process_update())
+        finally:
+            loop.close()
 
-      # Actually process the update
-      sync_process_update()
-
-
-      return Response(status=200)
+        return Response(status=200)
 
     except Exception as e:
       logger.error(f"Webhook processing error: {e}")
       logger.error(traceback.format_exc())
       return Response("Error processing webhook", status=500)
 
-  print("Bot application created and webhook set up")
+  # Add a health check endpoint
+  @app.route("/health", methods=["GET"])
+  def health_check():
+    return Response("Bot is running", status=200)
+
+  logger.info("Bot application created and webhook set up")
   return app
 
 
