@@ -4,6 +4,7 @@ from telegram import Update
 from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
+import traceback
 
 # Load Environment Variables
 load_dotenv()
@@ -165,9 +166,14 @@ def create_app():
   # Set up webhook route
   @app.route("/webhook", methods=["POST"])
   async def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    await application.process_update(update)
-    return Response(status=200)
+    try:
+      update = Update.de_json(request.get_json(force=True), application.bot)
+      await application.process_update(update)
+      return Response(status=200)
+    except Exception as e:
+      print("❌ Error in webhook:", str(e))
+      traceback.print_exc()
+      return Response("Internal Server Error", status=500)
 
   # Set webhook URL
   webhook_url = "https://refferonbot.onrender.com/webhook"
