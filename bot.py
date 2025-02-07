@@ -209,17 +209,17 @@ def create_app():
 
   @app.route("/webhook", methods=["POST"])
   async def webhook():
-    global telegram_application
-    if telegram_application is None:
+    global application
+    if application is None:
       raise RuntimeError("Telegram application not initialized")
 
     try:
       # Get the update data
       update_data = request.get_json(force=True)
-      update = Update.de_json(update_data, telegram_application.bot)
+      update = Update.de_json(update_data, application.bot)
 
       # Process the update
-      await telegram_application.process_update(update)
+      await application.process_update(update)
 
       return Response(status=200)
     except Exception as e:
