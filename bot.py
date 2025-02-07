@@ -164,31 +164,20 @@ def create_app():
   # Add error handler
   application.add_error_handler(error_handler)
 
-  # Initialize the bot before processing updates
-  async def initialize_bot():
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()  # Ensure bot is ready
-
-  loop = asyncio.get_event_loop()
-  loop.create_task(initialize_bot())
-
   # Set up webhook route
   @app.route("/webhook", methods=["POST"])
   def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    application.create_task(application.process_update(update))  # Async handling
+    asyncio.run(application.process_update(update))  # Run the async task
     return Response(status=200)
 
-  # Set webhook URL in an async-safe way
-  async def set_webhook():
-    webhook_url = "https://refferonbot.onrender.com/webhook"
-    await application.bot.set_webhook(webhook_url)
-
-  loop.create_task(set_webhook()) #schedule the webhook setup
+  # Set webhook URL
+  webhook_url = "https://refferonbot.onrender.com/webhook"
+  asyncio.run(application.bot.set_webhook(webhook_url))  # Run the async task
 
   print("Bot is running with webhooks...")
   return app
+
 
 # Entry point for Gunicorn
 app = create_app()
