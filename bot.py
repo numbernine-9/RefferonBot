@@ -24,6 +24,9 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # Initialize Flask app
 app = Flask(__name__)
 
+# Global variable to store the application
+application = None
+
 # Function to generate a unique referral code
 def generate_referral_code():
   return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
@@ -150,10 +153,15 @@ async def error_handler(update: Update, context: CallbackContext):
   if update.message:
     await update.message.reply_text("An error occurred. Please try again later.")
 
-# Initialize the bot application
-def create_app():
-  # Initialize the bot
-  application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+async def initialize_bot():
+  global application
+
+  # Create the Application and pass it your bot's token
+  application = (
+      Application.builder()
+      .token(TELEGRAM_BOT_TOKEN)
+      .build()
+  )
 
   # Add command handlers
   application.add_handler(CommandHandler("start", start))
@@ -164,16 +172,59 @@ def create_app():
   # Add error handler
   application.add_error_handler(error_handler)
 
-  # Set up webhook route
-  @app.route("/webhook", methods=["POST"])
-  def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))  # Run the async task
-    return Response(status=200)
-
-  # Set webhook URL
+  # Set webhook
   webhook_url = "https://refferonbot.onrender.com/webhook"
-  asyncio.run(application.bot.set_webhook(webhook_url))  # Run the async task
+  await application.bot.set_webhook(webhook_url)
+
+  return application
+
+
+# Initialize the bot application
+def create_app():
+  # # Initialize the bot
+  # application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+  # # Add command handlers
+  # application.add_handler(CommandHandler("start", start))
+  # application.add_handler(CommandHandler("leaderboard", leaderboard))
+  # application.add_handler(CommandHandler("redeem", redeem))
+  # application.add_handler(CommandHandler("sendlink", send_link))
+
+  # # Add error handler
+  # application.add_error_handler(error_handler)
+
+  # # Set up webhook route
+  # @app.route("/webhook", methods=["POST"])
+  # def webhook():
+  #   update = Update.de_json(request.get_json(force=True), application.bot)
+  #   asyncio.run(application.process_update(update))  # Run the async task
+  #   return Response(status=200)
+
+  # # Set webhook URL
+  # webhook_url = "https://refferonbot.onrender.com/webhook"
+  # asyncio.run(application.bot.set_webhook(webhook_url))  # Run the async task
+
+  # Run the async initialization
+  asyncio.run(initialize_bot())
+
+  @app.route("/webhook", methods=["POST"])
+  async def webhook():
+    global telegram_application
+    if telegram_application is None:
+      raise RuntimeError("Telegram application not initialized")
+
+    try:
+      # Get the update data
+      update_data = request.get_json(force=True)
+      update = Update.de_json(update_data, telegram_application.bot)
+
+      # Process the update
+      await telegram_application.process_update(update)
+
+      return Response(status=200)
+    except Exception as e:
+      print(f"Webhook error: {traceback.format_exc()}")
+      return Response(status=500)
 
   print("Bot is running with webhooks...")
   return app
@@ -181,3 +232,6 @@ def create_app():
 
 # Entry point for Gunicorn
 app = create_app()
+
+if __name__ == "__main__":
+  app.run(debug=True)
