@@ -8,6 +8,8 @@ import traceback
 import asyncio
 import logging
 from datetime import datetime, timezone
+import random
+import string
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -45,42 +47,50 @@ async def start(update: Update, context: CallbackContext):
     username = update.message.chat.username or "Unknown"
     logger.info(f"Received /start command from {username}")
 
-    # Check if user exists
-    response = supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
-    if response.data:
-      user = response.data[0]
-      referral_code = user["referral_code"]
-    else:
-      # Handle referral if a code is provided
-      referral_code = generate_referral_code()
-      referred_by_code = context.args[0] if context.args else None
+    # Create a new event loop for Supabase operations
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-      if referred_by_code:
-        # Get referrer
-        referrer_response = supabase.table("user_profiles").select("*").eq("referral_code", referred_by_code).execute()
-        if not referrer_response.data:
-          await update.message.reply_text("Invalid referral code.")
-          return
+    try:
+      # Check if user exists
+      response = supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
+      if response.data:
+        user = response.data[0]
+        referral_code = user["referral_code"]
+      else:
+        # Handle referral if a code is provided
+        referral_code = generate_referral_code()
+        referred_by_code = context.args[0] if context.args else None
 
-        referrer = referrer_response.data[0]
+        if referred_by_code:
+          # Get referrer
+          referrer_response = supabase.table("user_profiles").select("*").eq("referral_code", referred_by_code).execute()
+          if not referrer_response.data:
+            await update.message.reply_text("Invalid referral code.")
+            return
 
-        # Update referrer’s referral count and points
-        supabase.table("user_profiles").update({
-          "referrals": referrer["referrals"] + 1,
-          "points": referrer["points"] + 10  # 10 points per referral
-        }).eq("telegram_id", referrer["telegram_id"]).execute()
+          referrer = referrer_response.data[0]
 
-      # Create new user entry
-      supabase.table("user_profiles").insert({
-        "telegram_id": telegram_id,
-        "username": username,
-        "referral_code": referral_code,
-        "referred_by": referred_by_code
-      }).execute()
+          # Update referrer’s referral count and points
+          supabase.table("user_profiles").update({
+            "referrals": referrer["referrals"] + 1,
+            "points": referrer["points"] + 10  # 10 points per referral
+          }).eq("telegram_id", referrer["telegram_id"]).execute()
 
-    # Send welcome message with referral link
-    ref_link = f"https://t.me/{context.bot.username}?start={referral_code}"
-    await update.message.reply_text(f"Welcome {username}! 🎉\nYour referral link: {ref_link}")
+        # Create new user entry
+        supabase.table("user_profiles").insert({
+          "telegram_id": telegram_id,
+          "username": username,
+          "referral_code": referral_code,
+          "referred_by": referred_by_code
+        }).execute()
+
+      # Send welcome message with referral link
+      ref_link = f"https://t.me/{context.bot.username}?start={referral_code}"
+      await update.message.reply_text(f"Welcome {username}! 🎉\nYour referral link: {ref_link}")
+    finally:
+      loop.run_until_complete(loop.shutdown_asyncgens())
+      loop.close()
   except Exception as e:
     logger.error(f"Error in start command: {str(e)}")
     logger.error(traceback.format_exc())
@@ -233,6 +243,7 @@ def create_app():
     print(f"Failed to initialize Telegram application: {e}")
     raise
   finally:
+    loop.run_until_complete(loop.shutdown_asyncgens())
     loop.close()
 
 
