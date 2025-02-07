@@ -6,7 +6,14 @@ import os
 from dotenv import load_dotenv
 import traceback
 import asyncio
+import logging
+from datetime import datetime, timezone
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load Environment Variables
 # Load Environment Variables
 load_dotenv()
 
@@ -150,8 +157,23 @@ async def redeem(update: Update, context: CallbackContext):
 # Error Handler
 async def error_handler(update: Update, context: CallbackContext):
   print(f"Error: {context.error}")
-  if update.message:
-    await update.message.reply_text("An error occurred. Please try again later.")
+  try:
+    logger.error(f"An error occurred: {context.error}")
+
+    # Log additional context if available
+    if update and update.message:
+      logger.error(f"Error in message: {update.message.text}")
+
+    # Optionally send an error message
+    if update and update.message:
+      try:
+        await update.message.reply_text("Sorry, an error occurred while processing your request.")
+      except Exception as reply_error:
+        logger.error(f"Could not send error reply: {reply_error}")
+
+  except Exception as e:
+    logger.error(f"Error in error handler: {e}")
+
 
 async def initialize_bot():
   global application
@@ -175,40 +197,21 @@ async def initialize_bot():
 
     # Set webhook
     webhook_url = "https://refferonbot.onrender.com/webhook"
-    await application.bot.set_webhook(webhook_url)
+    logger.info(f"Setting webhook to: {webhook_url}")
+
+    response = await application.bot.set_webhook(webhook_url)
+    logger.info(f"Webhook set response: {response}")
+
 
     return application
   except Exception as e:
-    print(f"Error setting up Telegram application: {e}")
-    print(traceback.format_exc())
+    logger.error(f"Error initializing Telegram bot: {e}")
+    logger.error(traceback.format_exc())
     raise
 
 
 # Initialize the bot application
 def create_app():
-  # # Initialize the bot
-  # application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-  # # Add command handlers
-  # application.add_handler(CommandHandler("start", start))
-  # application.add_handler(CommandHandler("leaderboard", leaderboard))
-  # application.add_handler(CommandHandler("redeem", redeem))
-  # application.add_handler(CommandHandler("sendlink", send_link))
-
-  # # Add error handler
-  # application.add_error_handler(error_handler)
-
-  # # Set up webhook route
-  # @app.route("/webhook", methods=["POST"])
-  # def webhook():
-  #   update = Update.de_json(request.get_json(force=True), application.bot)
-  #   asyncio.run(application.process_update(update))  # Run the async task
-  #   return Response(status=200)
-
-  # # Set webhook URL
-  # webhook_url = "https://refferonbot.onrender.com/webhook"
-  # asyncio.run(application.bot.set_webhook(webhook_url))  # Run the async task
-
   global application
 
   # Initialize the Telegram application synchronously
@@ -225,29 +228,39 @@ def create_app():
   def webhook():
     global application
 
-    if application is None:
-      return Response("Telegram application not initialized", status=500)
-
     try:
+      # Capture raw request data for debugging
+      raw_data = request.get_data()
+      logger.info(f"Received raw webhook data: {raw_data}")
+
       # Get the update data
       update_data = request.get_json(force=True)
+      logger.info(f"Parsed update data: {update_data}")
+
+    # Verify global application is initialized
+      if application is None:
+        logger.error("Telegram bot application is not initialized")
+        return Response("Telegram application not initialized", status=500)
+
+      # Create update object
       update = Update.de_json(update_data, application.bot)
 
-      # Create a new event loop for processing the update
-      loop = asyncio.new_event_loop()
-      asyncio.set_event_loop(loop)
-
-      # Run the update processing
-      async def process_update():
-          await application.process_update(update)
-
-      loop.run_until_complete(process_update())
+      # Synchronous processing wrapper
+      def sync_process_update():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+          loop.run_until_complete(application.process_update(update))
+        except Exception as e:
+          logger.error(f"Error processing update: {e}")
+          logger.error(traceback.format_exc())
+          raise
 
       return Response(status=200)
 
     except Exception as e:
-      print(f"Webhook processing error: {e}")
-      print(traceback.format_exc())
+      logger.error(f"Webhook processing error: {e}")
+      logger.error(traceback.format_exc())
       return Response("Error processing webhook", status=500)
 
   print("Bot application created and webhook set up")
