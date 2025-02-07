@@ -156,27 +156,32 @@ async def error_handler(update: Update, context: CallbackContext):
 async def initialize_bot():
   global application
 
-  # Create the Application and pass it your bot's token
-  application = (
-      Application.builder()
-      .token(TELEGRAM_BOT_TOKEN)
-      .build()
-  )
+  try:
+    # Create the Application and pass it your bot's token
+    application = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .build()
+    )
 
-  # Add command handlers
-  application.add_handler(CommandHandler("start", start))
-  application.add_handler(CommandHandler("leaderboard", leaderboard))
-  application.add_handler(CommandHandler("redeem", redeem))
-  application.add_handler(CommandHandler("sendlink", send_link))
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("leaderboard", leaderboard))
+    application.add_handler(CommandHandler("redeem", redeem))
+    application.add_handler(CommandHandler("sendlink", send_link))
 
-  # Add error handler
-  application.add_error_handler(error_handler)
+    # Add error handler
+    application.add_error_handler(error_handler)
 
-  # Set webhook
-  webhook_url = "https://refferonbot.onrender.com/webhook"
-  await application.bot.set_webhook(webhook_url)
+    # Set webhook
+    webhook_url = "https://refferonbot.onrender.com/webhook"
+    await application.bot.set_webhook(webhook_url)
 
-  return application
+    return application
+  except Exception as e:
+    print(f"Error setting up Telegram application: {e}")
+    print(traceback.format_exc())
+    raise
 
 
 # Initialize the bot application
@@ -204,29 +209,48 @@ def create_app():
   # webhook_url = "https://refferonbot.onrender.com/webhook"
   # asyncio.run(application.bot.set_webhook(webhook_url))  # Run the async task
 
-  # Run the async initialization
-  asyncio.run(initialize_bot())
+  global application
+
+  # Initialize the Telegram application synchronously
+  loop = asyncio.new_event_loop()
+  asyncio.set_event_loop(loop)
+
+  try:
+    loop.run_until_complete(initialize_bot())
+  except Exception as e:
+    print(f"Failed to initialize Telegram application: {e}")
+    raise
 
   @app.route("/webhook", methods=["POST"])
-  async def webhook():
+  def webhook():
     global application
+
     if application is None:
-      raise RuntimeError("Telegram application not initialized")
+      return Response("Telegram application not initialized", status=500)
 
     try:
       # Get the update data
       update_data = request.get_json(force=True)
       update = Update.de_json(update_data, application.bot)
 
-      # Process the update
-      await application.process_update(update)
+      # Create a new event loop for processing the update
+      loop = asyncio.new_event_loop()
+      asyncio.set_event_loop(loop)
+
+      # Run the update processing
+      async def process_update():
+          await application.process_update(update)
+
+      loop.run_until_complete(process_update())
 
       return Response(status=200)
-    except Exception as e:
-      print(f"Webhook error: {traceback.format_exc()}")
-      return Response(status=500)
 
-  print("Bot is running with webhooks...")
+    except Exception as e:
+      print(f"Webhook processing error: {e}")
+      print(traceback.format_exc())
+      return Response("Error processing webhook", status=500)
+
+  print("Bot application created and webhook set up")
   return app
 
 
