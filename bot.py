@@ -257,6 +257,10 @@ def create_app():
           logger.error(traceback.format_exc())
           raise
 
+      # Actually process the update
+      sync_process_update()
+
+
       return Response(status=200)
 
     except Exception as e:
