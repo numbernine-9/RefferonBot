@@ -265,7 +265,7 @@ async def initialize_bot():
     logger.info("Bot initialized successfully")
 
     # ✅ Wait until bot is stopped properly
-    await application.updater.idle()
+    await application.run_polling()
   except Exception as e:
     logger.error(f"Error initializing bot: {e}")
     logger.error(traceback.format_exc())
