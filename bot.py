@@ -195,9 +195,12 @@ def webhook():
     update_data = request.get_json(force=True)
     update = Update.de_json(update_data, application.bot)
 
-    # loop = asyncio.get_event_loop()
-    asyncio.create_task(application.process_update(update))  # Run async task without blocking
-    # future.result()
+    # Check if there's an active event loop
+    try:
+      loop = asyncio.get_running_loop()
+      loop.create_task(application.process_update(update))  # Run in existing loop
+    except RuntimeError:
+      asyncio.run(application.process_update(update))  # Run in a new loop
 
     return Response("OK", status=200)
   except Exception as e:
