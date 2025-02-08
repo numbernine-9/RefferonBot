@@ -195,9 +195,9 @@ def webhook():
     update_data = request.get_json(force=True)
     update = Update.de_json(update_data, application.bot)
 
-    loop = asyncio.get_event_loop()
-    future = asyncio.run_coroutine_threadsafe(application.process_update(update), loop)
-    future.result()
+    # loop = asyncio.get_event_loop()
+    asyncio.create_task(application.process_update(update))  # Run async task without blocking
+    # future.result()
 
     return Response("OK", status=200)
   except Exception as e:
