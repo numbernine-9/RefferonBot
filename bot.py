@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 import random
 import string
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -227,6 +228,12 @@ async def error_handler(update: Update, context: CallbackContext):
   except Exception as e:
     logger.error(f"Error in error handler: {e}")
 
+# Background task to keep the event loop alive
+def background_task():
+  loop = asyncio.new_event_loop()
+  asyncio.set_event_loop(loop)
+  loop.run_forever()
+
 # Webhook Route
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -300,8 +307,12 @@ async def initialize_bot():
 # Initialize the bot application
 def create_app():
   global application
+
+  # Start the background task to keep the event loop alive
+  threading.Thread(target=background_task, daemon=True).start()
+
+  # Initialize the bot application
   loop = asyncio.get_event_loop()
-  asyncio.set_event_loop(loop)
   loop.run_until_complete(initialize_bot())
 
   logger.info("Flask app created and bot is initializing")
