@@ -241,31 +241,21 @@ async def initialize_bot():
   try:
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-
-    application.add_error_handler(error_handler)
-
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("leaderboard", leaderboard))
     application.add_handler(CommandHandler("redeem", redeem))
     application.add_handler(CommandHandler("sendlink", send_link))
 
+    application.add_error_handler(error_handler)
+
     # Set webhook
     webhook_url = "https://refferonbot.onrender.com/webhook"
     logger.info(f"Setting webhook to: {webhook_url}")
+
     await application.bot.set_webhook(webhook_url)
-
-    # # Initialize and start the bot
-    # await application.initialize()
-    # await application.start()
-
     logger.info("Bot initialized successfully")
 
-    # ✅ Wait until bot is stopped properly
-    await application.run_polling()
   except Exception as e:
     logger.error(f"Error initializing bot: {e}")
     logger.error(traceback.format_exc())
@@ -280,43 +270,8 @@ async def initialize_bot():
 # Initialize the bot application
 def create_app():
   global application
-
-  # # Schedule bot initialization in the background
-  # loop = asyncio.get_event_loop()
-  # loop.create_task(initialize_bot())
-
-  # @app.route("/webhook", methods=["POST"])
-  # def webhook():
-  #   global application
-
-  #   try:
-  #     raw_data = request.get_data()
-  #     logger.info(f"Received raw webhook data: {raw_data}")
-
-  #     update_data = request.get_json(force=True)
-  #     logger.info(f"Parsed update data: {update_data}")
-
-  #     if application is None:
-  #         logger.error("Telegram bot application is not initialized")
-  #         return Response("Telegram application not initialized", status=500)
-
-  #     # Process the update asynchronously
-  #     update = Update.de_json(update_data, application.bot)
-  #     asyncio.create_task(application.process_update(update))
-
-  #     return Response("OK", status=200)
-
-  #   except Exception as e:
-  #     logger.error(f"Webhook processing error: {e}")
-  #     logger.error(traceback.format_exc())
-  #     return Response("Error processing webhook", status=500)
-
-  # @app.route("/health", methods=["GET"])
-  # def health_check():
-  #   return Response("Bot is running", status=200)
   loop = asyncio.get_event_loop()
   loop.run_until_complete(initialize_bot())
-
 
   logger.info("Flask app created and bot is initializing")
   return app
