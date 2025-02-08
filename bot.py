@@ -129,7 +129,7 @@ async def send_link(update: Update, context: CallbackContext):
 
   for user in random_users.data:
     try:
-      asyncio.create_task(context.bot.send_message(user["telegram_id"], f"📢 New referral link shared: {referral_link}"))
+      context.bot.send_message(user["telegram_id"], f"📢 New referral link shared: {referral_link}")
     except Exception as e:
       print(f"Error sending message to {user['telegram_id']}: {e}")
 
