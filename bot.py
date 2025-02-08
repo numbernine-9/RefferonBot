@@ -241,6 +241,12 @@ async def initialize_bot():
   try:
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+
+    application.add_error_handler(error_handler)
+
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("leaderboard", leaderboard))
@@ -252,16 +258,23 @@ async def initialize_bot():
     logger.info(f"Setting webhook to: {webhook_url}")
     await application.bot.set_webhook(webhook_url)
 
-    # Initialize and start the bot
-    await application.initialize()
-    await application.start()
+    # # Initialize and start the bot
+    # await application.initialize()
+    # await application.start()
 
     logger.info("Bot initialized successfully")
-    return application
+
+    # ✅ Wait until bot is stopped properly
+    await application.updater.idle()
   except Exception as e:
     logger.error(f"Error initializing bot: {e}")
     logger.error(traceback.format_exc())
     raise
+  finally:
+    # ✅ Graceful shutdown to avoid pending tasks
+    logger.info("Shutting down bot...")
+    await application.stop()
+    await application.shutdown()
 
 
 # Initialize the bot application
