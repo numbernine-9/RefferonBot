@@ -213,12 +213,14 @@ def webhook():
     update_data = request.get_json(force=True)
     update = Update.de_json(update_data, application.bot)
 
-    # Check if there's an active event loop
-    try:
-      loop = asyncio.get_running_loop()
-      loop.create_task(application.process_update(update))  # Run in existing loop
-    except RuntimeError:
-      asyncio.run(application.process_update(update))  # Run in a new loop
+    # Process the update asynchronously
+    asyncio.create_task(application.process_update(update))
+    # # Check if there's an active event loop
+    # try:
+    #   loop = asyncio.get_running_loop()
+    #   loop.create_task(application.process_update(update))  # Run in existing loop
+    # except RuntimeError:
+    #   asyncio.run(application.process_update(update))  # Run in a new loop
 
     return Response("OK", status=200)
   except Exception as e:
@@ -260,17 +262,12 @@ async def initialize_bot():
     logger.error(f"Error initializing bot: {e}")
     logger.error(traceback.format_exc())
     raise
-  finally:
-    # ✅ Graceful shutdown to avoid pending tasks
-    logger.info("Shutting down bot...")
-    await application.stop()
-    await application.shutdown()
-
 
 # Initialize the bot application
 def create_app():
   global application
   loop = asyncio.get_event_loop()
+  asyncio.set_event_loop(loop)
   loop.run_until_complete(initialize_bot())
 
   logger.info("Flask app created and bot is initializing")
