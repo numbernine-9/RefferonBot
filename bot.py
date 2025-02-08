@@ -180,6 +180,32 @@ async def redeem(update: Update, context: CallbackContext):
     logger.error(traceback.format_exc())
     asyncio.create_task(update.message.reply_text("An error occurred while redeeming. Please try again later."))
 
+# Add this function to your existing code
+async def help_command(update: Update, context: CallbackContext):
+  help_text = """
+    🤖 **ReferronBot Commands**
+
+    Here are the available commands and how to use them:
+
+    1. **/start** - Start using the bot and get your referral link.
+      - Usage: `/start` or `/start <referral_code>` (if you were referred by someone).
+
+    2. **/sendlink <your-referral-link>** - Share your referral link with others.
+      - Usage: `/sendlink https://t.me/your_bot?start=your_referral_code`
+
+    3. **/leaderboard** - View the top 10 users with the most referrals and points.
+      - Usage: `/leaderboard`
+
+    4. **/redeem** - Redeem rewards using your points.
+      - Usage: `/redeem`
+
+    5. **/help** - Get this help message.
+      - Usage: `/help`
+
+    📝 **Note**: You can only send one referral link per day.
+        """
+  await update.message.reply_text(help_text, parse_mode="Markdown")
+
 
 # Error Handler
 async def error_handler(update: Update, context: CallbackContext):
@@ -255,6 +281,7 @@ async def initialize_bot():
     application.add_handler(CommandHandler("leaderboard", leaderboard))
     application.add_handler(CommandHandler("redeem", redeem))
     application.add_handler(CommandHandler("sendlink", send_link))
+    application.add_handler(CommandHandler("help", help_command))
 
     application.add_error_handler(error_handler)
 
