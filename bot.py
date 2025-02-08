@@ -213,6 +213,11 @@ def webhook():
     update_data = request.get_json(force=True)
     update = Update.de_json(update_data, application.bot)
 
+    # ✅ Ensure application is initialized before processing updates
+    if not application._initialized:
+      logger.warning("Application is not initialized! Initializing now...")
+      asyncio.run(initialize_bot())
+
     # Check if there's an active event loop
     try:
       loop = asyncio.get_running_loop()
@@ -241,6 +246,10 @@ async def initialize_bot():
   try:
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    # ✅ Initialize the application
+    await application.initialize()   # REQUIRED!
+    await application.start()
+
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("leaderboard", leaderboard))
@@ -252,8 +261,8 @@ async def initialize_bot():
     # Set webhook
     webhook_url = "https://refferonbot.onrender.com/webhook"
     logger.info(f"Setting webhook to: {webhook_url}")
-
     await application.bot.set_webhook(webhook_url)
+
     logger.info("Bot initialized successfully")
 
   except Exception as e:
