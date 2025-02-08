@@ -148,20 +148,38 @@ async def leaderboard(update: Update, context: CallbackContext):
 # Redeem Rewards
 async def redeem(update: Update, context: CallbackContext):
   telegram_id = update.message.chat_id
-  response = supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
 
-  if not response.data:
-    await update.message.reply_text("You are not registered!")
-    return
+  try:
+    # Fetch user data asynchronously
+    response = await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
+    )
 
-  user = response.data[0]
-  if user["points"] < 50:
-    await update.message.reply_text("You need at least 50 points to redeem a reward.")
-    return
+    if not response.data:
+      await update.message.reply_text("You are not registered!")
+      return
 
-  # Deduct points and confirm redemption
-  supabase.table("user_profiles").update({"points": user["points"] - 50}).eq("telegram_id", telegram_id).execute()
-  await update.message.reply_text("🎁 You have successfully redeemed a reward! Your points are now updated.")
+    user = response.data[0]
+
+    if user["points"] < 50:
+      await update.message.reply_text("You need at least 50 points to redeem a reward.")
+      return
+
+    # Deduct points asynchronously
+    await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").update(
+          {"points": user["points"] - 50}
+      ).eq("telegram_id", telegram_id).execute()
+    )
+
+    # Send confirmation message
+    asyncio.create_task(update.message.reply_text("🎁 You have successfully redeemed a reward! Your points are now updated."))
+
+  except Exception as e:
+    logger.error(f"Error in redeem command: {e}")
+    logger.error(traceback.format_exc())
+    asyncio.create_task(update.message.reply_text("An error occurred while redeeming. Please try again later."))
+
 
 # Error Handler
 async def error_handler(update: Update, context: CallbackContext):
