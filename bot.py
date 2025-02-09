@@ -2,15 +2,15 @@ from quart import Quart, request, Response
 from telegram.ext import Application, CommandHandler, CallbackContext
 from telegram import Update
 from supabase import create_client, Client
-import os
 from dotenv import load_dotenv
+from threading import Lock
+import os
 import traceback
 import asyncio
 import logging
 from datetime import datetime, timezone
 import random
 import string
-import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -35,6 +35,7 @@ app = Quart(__name__)
 
 # Global variable to store the application
 application = None
+app_lock = Lock()
 
 # Function to generate a unique referral code
 def generate_referral_code():
@@ -48,7 +49,10 @@ async def start(update: Update, context: CallbackContext):
     logger.info(f"Received /start command from {username}")
 
     # Check if user exists
-    response = supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
+    response = await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
+    )
+
     if response.data:
       user = response.data[0]
       referral_code = user["referral_code"]
@@ -58,7 +62,9 @@ async def start(update: Update, context: CallbackContext):
 
       if referred_by_code:
         # Get referrer
-        referrer_response = supabase.table("user_profiles").select("*").eq("referral_code", referred_by_code).execute()
+        referrer_response = await asyncio.to_thread(
+          lambda: supabase.table("user_profiles").select("*").eq("referral_code", referred_by_code).execute()
+        )
         if not referrer_response.data:
           await update.message.reply_text("Invalid referral code.")
           return
@@ -66,18 +72,22 @@ async def start(update: Update, context: CallbackContext):
         referrer = referrer_response.data[0]
 
         # Update referrer’s referral count and points
-        supabase.table("user_profiles").update({
-          "referrals": referrer["referrals"] + 1,
-          "points": referrer["points"] + 10
-        }).eq("telegram_id", referrer["telegram_id"]).execute()
+        await asyncio.to_thread(
+          lambda: supabase.table("user_profiles").update({
+            "referrals": referrer["referrals"] + 1,
+            "points": referrer["points"] + 10
+          }).eq("telegram_id", referrer["telegram_id"]).execute()
+        )
 
       # Create new user entry
-      supabase.table("user_profiles").insert({
-        "telegram_id": telegram_id,
-        "username": username,
-        "referral_code": referral_code,
-        "referred_by": referred_by_code
-      }).execute()
+      await asyncio.to_thread(
+        lambda: supabase.table("user_profiles").insert({
+          "telegram_id": telegram_id,
+          "username": username,
+          "referral_code": referral_code,
+          "referred_by": referred_by_code
+        }).execute()
+      )
 
     # Send welcome message
     ref_link = f"https://t.me/{context.bot.username}?start={referral_code}"
@@ -98,7 +108,9 @@ async def send_link(update: Update, context: CallbackContext):
     return
 
   referral_link = args[0]
-  user_response = supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
+  user_response = await asyncio.to_thread(
+    lambda: supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
+  )
   if not user_response.data:
     await update.message.reply_text("You are not registered!")
     return
@@ -108,20 +120,26 @@ async def send_link(update: Update, context: CallbackContext):
 
   # Check if user already sent a link today
   today = datetime.now(timezone.utc).date()
-  check_response = supabase.table("referral_links").select("*").eq("user_id", user_id).gte("created_at", str(today)).execute()
+  check_response = await asyncio.to_thread(
+    lambda: supabase.table("referral_links").select("*").eq("user_id", user_id).gte("created_at", str(today)).execute()
+  )
   if check_response.data:
     await update.message.reply_text("You can only send one referral link per day!")
     return
 
   # Insert the new referral link
-  supabase.table("referral_links").insert({
+  await asyncio.to_thread(
+    lambda: supabase.table("referral_links").insert({
       "user_id": user_id,
       "referral_link": referral_link,
       "created_at": datetime.now(timezone.utc).isoformat()
-  }).execute()
+    }).execute()
+  )
 
   # Get random users to distribute the link
-  random_users = supabase.table("user_profiles").select("telegram_id").neq("telegram_id", telegram_id).limit(5).execute()
+  random_users = await asyncio.to_thread(
+    lambda: supabase.table("user_profiles").select("telegram_id").neq("telegram_id", telegram_id).limit(5).execute()
+  )
   if not random_users.data:
     await update.message.reply_text("No users available to send your link.")
     return
@@ -137,7 +155,9 @@ async def send_link(update: Update, context: CallbackContext):
 # Show Leaderboard
 async def leaderboard(update: Update, context: CallbackContext):
   try:
-    response = supabase.table("user_profiles").select("username, referrals, points").order("referrals", desc=True).limit(10).execute()
+    response = await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").select("username, referrals, points").order("referrals", desc=True).limit(10).execute()
+    )
 
     leaderboard_text = "🏆 Referral Leaderboard:\n"
     for index, user in enumerate(response.data, start=1):
@@ -239,7 +259,7 @@ async def webhook():
     return Response("Telegram application not initialized", status=500)
 
   try:
-    update_data = request.get_json(force=True)
+    update_data = await request.get_json(force=True) # Await the JSON data
     update = Update.de_json(update_data, application.bot)
 
     # ✅ Ensure application is initialized before processing updates
@@ -248,16 +268,7 @@ async def webhook():
       # asyncio.run(initialize_bot())
       await initialize_bot()
 
-
-    # Check if there's an active event loop
-    # try:
-    #   loop = asyncio.get_running_loop()
-    #   loop.create_task(application.process_update(update))  # Run in existing loop
-    # except RuntimeError:
-    #   asyncio.run(application.process_update(update))  # Run in a new loop
-
     await application.process_update(update)
-
     return Response("OK", status=200)
   except Exception as e:
     logger.error(f"Webhook processing error: {e}")
@@ -267,43 +278,48 @@ async def webhook():
 # Health Check
 @app.route("/health", methods=["GET"])
 async def health_check():
+  if application is None or not application._initialized:
+    return Response("Bot is not initialized", status=503)
   return Response("Bot is running", status=200)
 
 # Initialize the bot
 async def initialize_bot():
   global application
 
-  if application is not None:
-    logger.info("Telegram bot is already initialized.")
-    return application
+  with app_lock:
+    if application is not None:
+      logger.info("Telegram bot is already initialized.")
+      return application
 
-  try:
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    retries = 3
+    for attempt in range(retries):
+      try:
+        application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # ✅ Initialize the application
-    await application.initialize()   # REQUIRED!
-    await application.start()
+        # ✅ Initialize the application
+        await application.initialize()   # REQUIRED!
+        await application.start()
 
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("leaderboard", leaderboard))
-    application.add_handler(CommandHandler("redeem", redeem))
-    application.add_handler(CommandHandler("sendlink", send_link))
-    application.add_handler(CommandHandler("help", help_command))
+        # Add command handlers
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("leaderboard", leaderboard))
+        application.add_handler(CommandHandler("redeem", redeem))
+        application.add_handler(CommandHandler("sendlink", send_link))
+        application.add_handler(CommandHandler("help", help_command))
 
-    application.add_error_handler(error_handler)
+        application.add_error_handler(error_handler)
 
-    # Set webhook
-    webhook_url = "https://refferonbot.onrender.com/webhook"
-    logger.info(f"Setting webhook to: {webhook_url}")
-    await application.bot.set_webhook(webhook_url)
+        # Set webhook
+        webhook_url = "https://refferonbot.onrender.com/webhook"
+        logger.info(f"Setting webhook to: {webhook_url}")
+        await application.bot.set_webhook(webhook_url)
 
-    logger.info("Bot initialized successfully")
+        logger.info("Bot initialized successfully")
 
-  except Exception as e:
-    logger.error(f"Error initializing bot: {e}")
-    logger.error(traceback.format_exc())
-    raise
+      except Exception as e:
+        logger.error(f"Error initializing bot: {e}")
+        logger.error(traceback.format_exc())
+        raise
 
 # Initialize the bot application
 def create_app():
@@ -319,6 +335,6 @@ def create_app():
 # Entry point for Gunicorn
 app = create_app()
 
-# For running the app locally
+# Entry point for Gunicorn
 if __name__ == "__main__":
   app.run(debug=True)
