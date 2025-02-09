@@ -1,4 +1,4 @@
-from flask import Flask, request, Response
+from quart import Quart, request, Response
 from telegram.ext import Application, CommandHandler, CallbackContext
 from telegram import Update
 from supabase import create_client, Client
@@ -30,8 +30,8 @@ if not all([SUPABASE_URL, SUPABASE_KEY, TELEGRAM_BOT_TOKEN]):
 # Initialize Supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Initialize Flask app
-app = Flask(__name__)
+# Initialize Quart app
+app = Quart(__name__)
 
 # Global variable to store the application
 application = None
@@ -230,15 +230,9 @@ async def error_handler(update: Update, context: CallbackContext):
   except Exception as e:
     logger.error(f"Error in error handler: {e}")
 
-# Background task to keep the event loop alive
-def background_task():
-  loop = asyncio.new_event_loop()
-  asyncio.set_event_loop(loop)
-  loop.run_forever()
-
 # Webhook Route
 @app.route("/webhook", methods=["POST"])
-def webhook():
+async def webhook():
   global application
   if application is None:
     logger.error("Telegram bot application is not initialized")
@@ -251,14 +245,18 @@ def webhook():
     # ✅ Ensure application is initialized before processing updates
     if not application._initialized:
       logger.warning("Application is not initialized! Initializing now...")
-      asyncio.run(initialize_bot())
+      # asyncio.run(initialize_bot())
+      await initialize_bot()
+
 
     # Check if there's an active event loop
-    try:
-      loop = asyncio.get_running_loop()
-      loop.create_task(application.process_update(update))  # Run in existing loop
-    except RuntimeError:
-      asyncio.run(application.process_update(update))  # Run in a new loop
+    # try:
+    #   loop = asyncio.get_running_loop()
+    #   loop.create_task(application.process_update(update))  # Run in existing loop
+    # except RuntimeError:
+    #   asyncio.run(application.process_update(update))  # Run in a new loop
+
+    await application.process_update(update)
 
     return Response("OK", status=200)
   except Exception as e:
@@ -268,7 +266,7 @@ def webhook():
 
 # Health Check
 @app.route("/health", methods=["GET"])
-def health_check():
+async def health_check():
   return Response("Bot is running", status=200)
 
 # Initialize the bot
@@ -311,18 +309,16 @@ async def initialize_bot():
 def create_app():
   global application
 
-  # Start the background task to keep the event loop alive
-  threading.Thread(target=background_task, daemon=True).start()
-
   # Initialize the bot
-  loop = asyncio.get_event_loop()
-  loop.run_until_complete(initialize_bot())
+  asyncio.run(initialize_bot())
 
-  logger.info("Flask app created and bot is initializing")
+  logger.info("Quart app created and bot is initializing")
   return app
+
 
 # Entry point for Gunicorn
 app = create_app()
 
+# For running the app locally
 if __name__ == "__main__":
   app.run(debug=True)

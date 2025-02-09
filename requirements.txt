@@ -1,8 +1,6 @@
 python-telegram-bot
 supabase
 python-dotenv
-Flask
 gunicorn
+quart
 uvicorn
-Flask[async]
-gevent
