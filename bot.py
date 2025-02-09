@@ -17,7 +17,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load Environment Variables
-# Load Environment Variables
 load_dotenv()
 
 # Validate Environment Variables
@@ -89,7 +88,6 @@ async def start(update: Update, context: CallbackContext):
     logger.error(traceback.format_exc())
     await update.message.reply_text("An error occurred. Please try again later.")
 
-
 # Handle Sending Referral Link Once Per Day
 async def send_link(update: Update, context: CallbackContext):
   telegram_id = update.message.chat_id
@@ -130,21 +128,26 @@ async def send_link(update: Update, context: CallbackContext):
 
   for user in random_users.data:
     try:
-      context.bot.send_message(user["telegram_id"], f"📢 New referral link shared: {referral_link}")
+      await context.bot.send_message(user["telegram_id"], f"📢 New referral link shared: {referral_link}")
     except Exception as e:
-      print(f"Error sending message to {user['telegram_id']}: {e}")
+      logger.error(f"Error sending message to {user['telegram_id']}: {e}")
 
   await update.message.reply_text("✅ Your referral link has been shared with random users!")
 
 # Show Leaderboard
 async def leaderboard(update: Update, context: CallbackContext):
-  response = supabase.table("user_profiles").select("username, referrals, points").order("referrals", desc=True).limit(10).execute()
+  try:
+    response = supabase.table("user_profiles").select("username, referrals, points").order("referrals", desc=True).limit(10).execute()
 
-  leaderboard_text = "🏆 Referral Leaderboard:\n"
-  for index, user in enumerate(response.data, start=1):
-    leaderboard_text += f"{index}. {user['username']} - {user['referrals']} referrals, {user['points']} points\n"
+    leaderboard_text = "🏆 Referral Leaderboard:\n"
+    for index, user in enumerate(response.data, start=1):
+      leaderboard_text += f"{index}. {user['username']} - {user['referrals']} referrals, {user['points']} points\n"
 
-  await update.message.reply_text(leaderboard_text)
+    await update.message.reply_text(leaderboard_text)
+  except Exception as e:
+    logger.error(f"Error in leaderboard command: {e}")
+    logger.error(traceback.format_exc())
+    await update.message.reply_text("An error occurred while fetching the leaderboard. Please try again later.")
 
 # Redeem Rewards
 async def redeem(update: Update, context: CallbackContext):
@@ -174,16 +177,16 @@ async def redeem(update: Update, context: CallbackContext):
     )
 
     # Send confirmation message
-    asyncio.create_task(update.message.reply_text("🎁 You have successfully redeemed a reward! Your points are now updated."))
+    await update.message.reply_text("🎁 You have successfully redeemed a reward! Your points are now updated.")
 
   except Exception as e:
     logger.error(f"Error in redeem command: {e}")
     logger.error(traceback.format_exc())
-    asyncio.create_task(update.message.reply_text("An error occurred while redeeming. Please try again later."))
+    await update.message.reply_text("An error occurred while redeeming. Please try again later.")
 
-# Add this function to your existing code
+# Help Command
 async def help_command(update: Update, context: CallbackContext):
-  help_text = """
+    help_text = """
     🤖 **ReferronBot Commands**
 
     Here are the available commands and how to use them:
@@ -204,9 +207,8 @@ async def help_command(update: Update, context: CallbackContext):
       - Usage: `/help`
 
     📝 **Note**: You can only send one referral link per day.
-        """
-  await update.message.reply_text(help_text, parse_mode="Markdown")
-
+      """
+    await update.message.reply_text(help_text, parse_mode="Markdown")
 
 # Error Handler
 async def error_handler(update: Update, context: CallbackContext):
@@ -269,6 +271,7 @@ def webhook():
 def health_check():
   return Response("Bot is running", status=200)
 
+# Initialize the bot
 async def initialize_bot():
   global application
 
@@ -311,13 +314,12 @@ def create_app():
   # Start the background task to keep the event loop alive
   threading.Thread(target=background_task, daemon=True).start()
 
-  # Initialize the bot application
+  # Initialize the bot
   loop = asyncio.get_event_loop()
   loop.run_until_complete(initialize_bot())
 
   logger.info("Flask app created and bot is initializing")
   return app
-
 
 # Entry point for Gunicorn
 app = create_app()
