@@ -1,8 +1,10 @@
 from quart import Quart, request, Response
-from telegram.ext import Application, CommandHandler, CallbackContext
+from telegram.ext import Application, CommandHandler, CallbackContext, CallbackQueryHandler
 from telegram import Update
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 from threading import Lock
 import os
 import traceback
@@ -270,37 +272,225 @@ async def redeem(update: Update, context: CallbackContext):
 async def buy_sendlink(update: Update, context: CallbackContext):
   telegram_id = update.message.chat_id
 
+  # try:
+  #   # Check if the user has already used their free daily opportunity
+  #   if not await check_daily_sendlink_limit(telegram_id):
+  #     await update.message.reply_text("You have already used your free daily sendlink opportunity.")
+  #     return
+
+  #   # Check if the user has already bought an additional opportunity today
+  #   response = await asyncio.to_thread(
+  #     lambda: supabase.table("user_payments").select("*")
+  #     .eq("user_id", telegram_id)
+  #     .eq("payment_status", "completed")
+  #     .gte("created_at", str(datetime.now(timezone.utc).date()))
+  #     .execute()
+  #   )
+
+  #   if response.data:
+  #     await update.message.reply_text("You have already bought an additional sendlink opportunity today.")
+  #     return
+
+  #   # Provide payment instructions
+  #   payment_wallet = "UQC7ULX1aBGwJBI5BRtYID0V5a0FxsBLOjb3Rwrkvl-r8l3k"  # Replace with your TON wallet address
+  #   await update.message.reply_text(
+  #     f"To buy an additional sendlink opportunity, send 1 TON to the following wallet address:\n\n"
+  #     f"`{payment_wallet}`\n\n"
+  #     f"Once the payment is confirmed, you will be able to send one more link today."
+  #   )
+
+  # except Exception as e:
+  #   logger.error(f"Error in buy_sendlink command: {e}")
+  #   logger.error(traceback.format_exc())
+  #   await update.message.reply_text("An error occurred. Please try again later.")
   try:
-    # Check if the user has already used their free daily opportunity
-    if not await check_daily_sendlink_limit(telegram_id):
-      await update.message.reply_text("You have already used your free daily sendlink opportunity.")
-      return
-
-    # Check if the user has already bought an additional opportunity today
-    response = await asyncio.to_thread(
-      lambda: supabase.table("user_payments").select("*")
-      .eq("user_id", telegram_id)
-      .eq("payment_status", "completed")
-      .gte("created_at", str(datetime.now(timezone.utc).date()))
-      .execute()
+    # Fetch user balance and sendlink opportunities
+    user_response = await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").select("balance, sendlink_opportunities").eq("telegram_id", telegram_id).execute()
     )
+    user = user_response.data[0] if user_response.data else None
 
-    if response.data:
-      await update.message.reply_text("You have already bought an additional sendlink opportunity today.")
+    if not user:
+      await update.message.reply_text("You are not registered!")
       return
 
-    # Provide payment instructions
-    payment_wallet = "UQC7ULX1aBGwJBI5BRtYID0V5a0FxsBLOjb3Rwrkvl-r8l3k"  # Replace with your TON wallet address
+    user_balance = user["balance"]
+    sendlink_opportunities = user["sendlink_opportunities"]
+
+    # Create inline keyboard
+    keyboard = [
+      [InlineKeyboardButton("Buy Ads", callback_data="buy_ads")],
+      [InlineKeyboardButton("History", callback_data="view_history")],
+      [InlineKeyboardButton("Wallet", callback_data="view_wallet")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Send message with inline keyboard
     await update.message.reply_text(
-      f"To buy an additional sendlink opportunity, send 1 TON to the following wallet address:\n\n"
-      f"`{payment_wallet}`\n\n"
-      f"Once the payment is confirmed, you will be able to send one more link today."
-    )
+      f"Your balance: {user_balance} TON\n"
+      f"Sendlink opportunities left today: {sendlink_opportunities}\n\n"
+      "Choose an option:",
+      reply_markup=reply_markup
+  )
 
   except Exception as e:
     logger.error(f"Error in buy_sendlink command: {e}")
     logger.error(traceback.format_exc())
     await update.message.reply_text("An error occurred. Please try again later.")
+
+
+async def handle_callback_query(update: Update, context: CallbackContext):
+  query = update.callback_query
+  await query.answer()
+
+  if query.data == "buy_ads":
+    await show_buy_ads_interface(query)
+  elif query.data == "view_history":
+    await show_transaction_history(query)
+  elif query.data == "view_wallet":
+    await show_wallet_balance(query)
+  elif query.data == "back_to_main":
+    await show_main_menu(query)
+  elif query.data.startswith("buy_"):
+    await handle_buy_impressions(query)
+  elif query.data == "top_up_wallet":
+    await top_up_wallet(query)
+
+async def handle_buy_impressions(query):
+  telegram_id = query.from_user.id
+  impressions = int(query.data.split("_")[1])  # Extract impressions from callback_data
+  price = impressions * 0.01  # Calculate price (0.01 TON per impression)
+
+  try:
+    # Fetch user balance
+    user_response = await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").select("balance").eq("telegram_id", telegram_id).execute()
+    )
+    user_balance = user_response.data[0]["balance"] if user_response.data else 0
+
+    # Check if the user has enough balance
+    if user_balance < price:
+      await query.edit_message_text("Insufficient balance. Please top up your wallet.")
+      return
+
+    # Deduct the price from the user's balance
+    new_balance = user_balance - price
+    await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").update({"balance": new_balance})
+      .eq("telegram_id", telegram_id)
+      .execute()
+    )
+
+    # Add the impressions to the user's sendlink opportunities
+    await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").update({"sendlink_opportunities": impressions})
+      .eq("telegram_id", telegram_id)
+      .execute()
+    )
+
+    # Log the transaction
+    await asyncio.to_thread(
+      lambda: supabase.table("transactions").insert({
+        "user_id": telegram_id,
+        "amount": price,
+        "transaction_type": "purchase",
+        "status": "completed"
+      }).execute()
+    )
+
+    # Notify the user
+    await query.edit_message_text(f"✅ You have successfully purchased {impressions} impressions for {price} TON.")
+
+  except Exception as e:
+    logger.error(f"Error handling buy impressions: {e}")
+    logger.error(traceback.format_exc())
+    await query.edit_message_text("An error occurred. Please try again later.")
+
+async def show_main_menu(query):
+  # Fetch user balance
+  telegram_id = query.from_user.id
+  user_response = await asyncio.to_thread(
+    lambda: supabase.table("user_profiles").select("balance").eq("telegram_id", telegram_id).execute()
+  )
+  user_balance = user_response.data[0]["balance"] if user_response.data else 0
+
+  # Create inline keyboard
+  keyboard = [
+    [InlineKeyboardButton("Buy Ads", callback_data="buy_ads")],
+    [InlineKeyboardButton("History", callback_data="view_history")],
+    [InlineKeyboardButton("Wallet", callback_data="view_wallet")]
+  ]
+  reply_markup = InlineKeyboardMarkup(keyboard)
+
+  # Send message with inline keyboard
+  await query.edit_message_text(
+    f"Your balance: {user_balance} TON\n\n"
+    "Choose an option:",
+    reply_markup=reply_markup
+  )
+
+async def show_buy_ads_interface(query):
+  # Display the buy ads interface
+  keyboard = [
+    [InlineKeyboardButton("5 Impressions - 0.05 TON", callback_data="buy_5_impressions")],
+    [InlineKeyboardButton("10 Impressions - 0.10 TON", callback_data="buy_10_impressions")],
+    [InlineKeyboardButton("Back", callback_data="back_to_main")]
+  ]
+  reply_markup = InlineKeyboardMarkup(keyboard)
+
+  await query.edit_message_text(
+    "Buy Ads:\n\n"
+    "1. 5 Impressions - 0.05 TON\n"
+    "2. 10 Impressions - 0.10 TON\n\n"
+    "Impressions are not equivalent to referrals. Not everybody who sees your link will click it and become your referrals.",
+    reply_markup=reply_markup
+  )
+
+async def show_transaction_history(query):
+  # Fetch and display transaction history
+  telegram_id = query.from_user.id
+  transactions = await asyncio.to_thread(
+    lambda: supabase.table("transactions").select("*").eq("user_id", telegram_id).execute()
+  )
+
+  history_text = "Transaction History:\n\n"
+  for transaction in transactions.data:
+    history_text += f"{transaction['created_at']}: {transaction['amount']} TON ({transaction['status']})\n"
+
+  keyboard = [[InlineKeyboardButton("Back", callback_data="back_to_main")]]
+  reply_markup = InlineKeyboardMarkup(keyboard)
+
+  await query.edit_message_text(history_text, reply_markup=reply_markup)
+
+async def show_wallet_balance(query):
+  # Fetch and display wallet balance
+  telegram_id = query.from_user.id
+  user_response = await asyncio.to_thread(
+    lambda: supabase.table("user_profiles").select("balance").eq("telegram_id", telegram_id).execute()
+  )
+  user_balance = user_response.data[0]["balance"] if user_response.data else 0
+
+  keyboard = [
+    [InlineKeyboardButton("Top Up", callback_data="top_up_wallet")],
+    [InlineKeyboardButton("Back", callback_data="back_to_main")]
+  ]
+  reply_markup = InlineKeyboardMarkup(keyboard)
+
+  await query.edit_message_text(
+    f"Your balance: {user_balance} TON\n\n"
+    "Choose an option:",
+    reply_markup=reply_markup
+  )
+
+async def top_up_wallet(query):
+  telegram_id = query.from_user.id
+  payment_wallet = "UQC7ULX1aBGwJBI5BRtYID0V5a0FxsBLOjb3Rwrkvl-r8l3k"  # Replace with your TON wallet address
+
+  await query.edit_message_text(
+    f"To top up your wallet, send TON to the following address:\n\n"
+    f"`{payment_wallet}`\n\n"
+    "Once the payment is confirmed, your balance will be updated."
+  )
 
 # Help Command
 async def help_command(update: Update, context: CallbackContext):
@@ -356,31 +546,35 @@ async def payment_confirmation():
   data = await request.get_json()
   telegram_id = data.get("telegram_id")
   payment_wallet = data.get("payment_wallet")
+  amount = data.get("amount")
 
   try:
-    # Update the payment status
+    # Update user balance
     await asyncio.to_thread(
-      lambda: supabase.table("user_payments").update({"payment_status": "completed"})
-      .eq("user_id", telegram_id)
-      .eq("payment_wallet", payment_wallet)
-      .execute()
-    )
-
-    # Grant an additional sendlink opportunity
-    await asyncio.to_thread(
-      lambda: supabase.table("user_profiles").update({"sendlink_opportunities": 1})
+      lambda: supabase.table("user_profiles").update({"balance": amount})
       .eq("telegram_id", telegram_id)
       .execute()
     )
 
+    # Log the transaction
+    await asyncio.to_thread(
+      lambda: supabase.table("transactions").insert({
+        "user_id": telegram_id,
+        "amount": amount,
+        "transaction_type": "topup",
+        "status": "completed"
+      }).execute()
+    )
+
     # Notify the user
-    await application.bot.send_message(telegram_id, "Your payment has been confirmed! You can now send one more link today.")
+    await application.bot.send_message(telegram_id, f"Your wallet has been topped up with {amount} TON.")
 
     return Response("Payment confirmed", status=200)
   except Exception as e:
     logger.error(f"Error confirming payment: {e}")
     logger.error(traceback.format_exc())
     return Response("Error confirming payment", status=500)
+
 
 # Webhook Route
 @app.route("/webhook", methods=["POST"])
@@ -439,6 +633,9 @@ async def initialize_bot():
         application.add_handler(CommandHandler("sendlink", send_link))
         application.add_handler(CommandHandler("buysendlink", buy_sendlink))
         application.add_handler(CommandHandler("help", help_command))
+
+        application.add_handler(CallbackQueryHandler(handle_callback_query))
+
 
         application.add_error_handler(error_handler)
 

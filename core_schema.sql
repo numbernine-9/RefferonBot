@@ -139,6 +139,7 @@ CREATE TABLE user_profiles (
   referred_by TEXT,
   referrals INTEGER DEFAULT 0,
   points INTEGER DEFAULT 0,
+  balance NUMERIC DEFAULT 0,
   sendlink_opportunities INTEGER DEFAULT 1,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'banned')),
   last_login TIMESTAMP WITH TIME ZONE,
@@ -200,6 +201,27 @@ CREATE TABLE user_payments (
   payment_type TEXT NOT NULL CHECK (payment_type IN ('withdrawal', 'deposit', 'reward')),
   currency TEXT DEFAULT 'USD',
   notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE ads (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES user_profiles(id) ON DELETE CASCADE,
+  referral_link TEXT NOT NULL,
+  impressions INTEGER NOT NULL,
+  price NUMERIC NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- Can be 'pending', 'approved', 'rejected'
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE transactions (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES user_profiles(id) ON DELETE CASCADE,
+  amount NUMERIC NOT NULL,
+  transaction_type TEXT NOT NULL, -- Can be 'topup', 'purchase'
+  status TEXT NOT NULL DEFAULT 'pending', -- Can be 'pending', 'completed', 'failed'
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
