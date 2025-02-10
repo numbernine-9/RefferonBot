@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 import random
 import string
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -444,14 +445,28 @@ async def initialize_bot():
         # Set webhook
         webhook_url = "https://refferonbot.onrender.com/webhook"
         logger.info(f"Setting webhook to: {webhook_url}")
-        await application.bot.set_webhook(webhook_url)
+        await set_webhook_with_retry(application, webhook_url)
 
         logger.info("Bot initialized successfully")
-
+        return application
       except Exception as e:
         logger.error(f"Error initializing bot: {e}")
         logger.error(traceback.format_exc())
         raise
+
+async def set_webhook_with_retry(application, webhook_url):
+  retries = 3
+  for attempt in range(retries):
+    try:
+      await application.bot.set_webhook(webhook_url)
+      logger.info(f"Webhook set successfully: {webhook_url}")
+      return
+    except Exception as e:
+      logger.error(f"Error setting webhook (attempt {attempt + 1}/{retries}): {e}")
+      if attempt == retries - 1:
+          raise
+      time.sleep(1)  # Wait before retrying
+
 
 # Initialize the bot application
 def create_app():
