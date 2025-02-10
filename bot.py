@@ -41,6 +41,38 @@ app_lock = Lock()
 def generate_referral_code():
   return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 
+# Function to check if the user has already used their daily sendlink opportunity
+async def check_daily_sendlink_limit(telegram_id: int) -> bool:
+  """
+  Check if the user has already used their daily sendlink opportunity.
+  Returns True if the user can send a link today, False otherwise.
+  """
+  try:
+    # Get the last sendlink date for the user
+    response = await asyncio.to_thread(
+      lambda: supabase.table("referral_links")
+      .select("created_at")
+      .eq("user_id", telegram_id)
+      .order("created_at", desc=True)
+      .limit(1)
+      .execute()
+    )
+
+    if not response.data:
+      # No sendlink exists for the user, so they can send one today
+      return True
+
+    last_sendlink_date = response.data[0]["created_at"].date()
+    today = datetime.now(timezone.utc).date()
+
+    # If the last sendlink was not today, the user can send one
+    return last_sendlink_date != today
+
+  except Exception as e:
+    logger.error(f"Error checking daily sendlink limit: {e}")
+    logger.error(traceback.format_exc())
+    return False  # Assume the user cannot send a link if there's an error
+
 # Start Command
 async def start(update: Update, context: CallbackContext):
   try:
@@ -108,49 +140,78 @@ async def send_link(update: Update, context: CallbackContext):
     return
 
   referral_link = args[0]
-  user_response = await asyncio.to_thread(
-    lambda: supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
-  )
-  if not user_response.data:
-    await update.message.reply_text("You are not registered!")
-    return
 
-  user = user_response.data[0]
-  user_id = user["id"]
+  try:
+    user_response = await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").select("*").eq("telegram_id", telegram_id).execute()
+    )
+    if not user_response.data:
+      await update.message.reply_text("You are not registered!")
+      return
 
-  # Check if user already sent a link today
-  today = datetime.now(timezone.utc).date()
-  check_response = await asyncio.to_thread(
-    lambda: supabase.table("referral_links").select("*").eq("user_id", user_id).gte("created_at", str(today)).execute()
-  )
-  if check_response.data:
-    await update.message.reply_text("You can only send one referral link per day!")
-    return
+    user = user_response.data[0]
+    user_id = user["id"]
 
-  # Insert the new referral link
-  await asyncio.to_thread(
-    lambda: supabase.table("referral_links").insert({
-      "user_id": user_id,
-      "referral_link": referral_link,
-      "created_at": datetime.now(timezone.utc).isoformat()
-    }).execute()
-  )
+    # Check if the user has already used their free daily opportunity
+    has_free_opportunity = await check_daily_sendlink_limit(user_id)
 
-  # Get random users to distribute the link
-  random_users = await asyncio.to_thread(
-    lambda: supabase.table("user_profiles").select("telegram_id").neq("telegram_id", telegram_id).limit(5).execute()
-  )
-  if not random_users.data:
-    await update.message.reply_text("No users available to send your link.")
-    return
+    # Check if the user has any paid opportunities left
+    has_paid_opportunities = user["sendlink_opportunities"] > 0
 
-  for user in random_users.data:
-    try:
-      await context.bot.send_message(user["telegram_id"], f"📢 New referral link shared: {referral_link}")
-    except Exception as e:
-      logger.error(f"Error sending message to {user['telegram_id']}: {e}")
+    # If the user has no free opportunity and no paid opportunities, deny the request
+    if not has_free_opportunity and not has_paid_opportunities:
+      await update.message.reply_text("You have no sendlink opportunities left today.")
+      return
 
-  await update.message.reply_text("✅ Your referral link has been shared with random users!")
+    # Deduct one opportunity (free or paid)
+    if has_free_opportunity:
+      # Use the free opportunity
+      pass  # No need to deduct anything for free opportunities
+    else:
+      # Use a paid opportunity
+      await asyncio.to_thread(
+        lambda: supabase.table("user_profiles").update(
+          {"sendlink_opportunities": user["sendlink_opportunities"] - 1}
+        ).eq("telegram_id", telegram_id).execute()
+      )
+
+    # Insert the new referral link
+    await asyncio.to_thread(
+      lambda: supabase.table("referral_links").insert({
+        "user_id": user_id,
+        "referral_link": referral_link,
+        "created_at": datetime.now(timezone.utc).isoformat()
+      }).execute()
+    )
+
+    # Determine the number of users to share the link with
+    num_users_to_share = 30 if has_paid_opportunities else 3
+
+    # Get random users to distribute the link
+    random_users = await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").select("telegram_id")
+      .neq("telegram_id", telegram_id)
+      .limit(num_users_to_share)
+      .execute()
+    )
+
+    if not random_users.data:
+      await update.message.reply_text("No users available to send your link.")
+      return
+
+    for user in random_users.data:
+      try:
+        await context.bot.send_message(user["telegram_id"], f"📢 New referral link shared: {referral_link}")
+      except Exception as e:
+        logger.error(f"Error sending message to {user['telegram_id']}: {e}")
+
+    await update.message.reply_text("✅ Your referral link has been shared with random users!")
+
+  except Exception as e:
+    logger.error(f"Error in sendlink command: {e}")
+    logger.error(traceback.format_exc())
+    await update.message.reply_text("An error occurred. Please try again later.")
+
 
 # Show Leaderboard
 async def leaderboard(update: Update, context: CallbackContext):
@@ -204,6 +265,42 @@ async def redeem(update: Update, context: CallbackContext):
     logger.error(traceback.format_exc())
     await update.message.reply_text("An error occurred while redeeming. Please try again later.")
 
+#
+async def buy_sendlink(update: Update, context: CallbackContext):
+  telegram_id = update.message.chat_id
+
+  try:
+    # Check if the user has already used their free daily opportunity
+    if not await check_daily_sendlink_limit(telegram_id):
+      await update.message.reply_text("You have already used your free daily sendlink opportunity.")
+      return
+
+    # Check if the user has already bought an additional opportunity today
+    response = await asyncio.to_thread(
+      lambda: supabase.table("user_payments").select("*")
+      .eq("user_id", telegram_id)
+      .eq("payment_status", "completed")
+      .gte("created_at", str(datetime.now(timezone.utc).date()))
+      .execute()
+    )
+
+    if response.data:
+      await update.message.reply_text("You have already bought an additional sendlink opportunity today.")
+      return
+
+    # Provide payment instructions
+    payment_wallet = "UQC7ULX1aBGwJBI5BRtYID0V5a0FxsBLOjb3Rwrkvl-r8l3k"  # Replace with your TON wallet address
+    await update.message.reply_text(
+      f"To buy an additional sendlink opportunity, send 1 TON to the following wallet address:\n\n"
+      f"`{payment_wallet}`\n\n"
+      f"Once the payment is confirmed, you will be able to send one more link today."
+    )
+
+  except Exception as e:
+    logger.error(f"Error in buy_sendlink command: {e}")
+    logger.error(traceback.format_exc())
+    await update.message.reply_text("An error occurred. Please try again later.")
+
 # Help Command
 async def help_command(update: Update, context: CallbackContext):
     help_text = """
@@ -217,13 +314,16 @@ async def help_command(update: Update, context: CallbackContext):
     2. **/sendlink <your-referral-link>** - Share your referral link with others.
       - Usage: `/sendlink https://t.me/your_bot?start=your_referral_code`
 
-    3. **/leaderboard** - View the top 10 users with the most referrals and points.
+    3. **/buysendlink** - Buy daily sendlink opportunities.
+      - Usage: `/buysendlink`
+
+    4. **/leaderboard** - View the top 10 users with the most referrals and points.
       - Usage: `/leaderboard`
 
-    4. **/redeem** - Redeem rewards using your points.
+    5. **/redeem** - Redeem rewards using your points.
       - Usage: `/redeem`
 
-    5. **/help** - Get this help message.
+    6. **/help** - Get this help message.
       - Usage: `/help`
 
     📝 **Note**: You can only send one referral link per day.
@@ -249,6 +349,37 @@ async def error_handler(update: Update, context: CallbackContext):
 
   except Exception as e:
     logger.error(f"Error in error handler: {e}")
+
+@app.route("/payment-confirmation", methods=["POST"])
+async def payment_confirmation():
+  data = await request.get_json()
+  telegram_id = data.get("telegram_id")
+  payment_wallet = data.get("payment_wallet")
+
+  try:
+    # Update the payment status
+    await asyncio.to_thread(
+      lambda: supabase.table("user_payments").update({"payment_status": "completed"})
+      .eq("user_id", telegram_id)
+      .eq("payment_wallet", payment_wallet)
+      .execute()
+    )
+
+    # Grant an additional sendlink opportunity
+    await asyncio.to_thread(
+      lambda: supabase.table("user_profiles").update({"sendlink_opportunities": 1})
+      .eq("telegram_id", telegram_id)
+      .execute()
+    )
+
+    # Notify the user
+    await application.bot.send_message(telegram_id, "Your payment has been confirmed! You can now send one more link today.")
+
+    return Response("Payment confirmed", status=200)
+  except Exception as e:
+    logger.error(f"Error confirming payment: {e}")
+    logger.error(traceback.format_exc())
+    return Response("Error confirming payment", status=500)
 
 # Webhook Route
 @app.route("/webhook", methods=["POST"])
@@ -305,6 +436,7 @@ async def initialize_bot():
         application.add_handler(CommandHandler("leaderboard", leaderboard))
         application.add_handler(CommandHandler("redeem", redeem))
         application.add_handler(CommandHandler("sendlink", send_link))
+        application.add_handler(CommandHandler("buysendlink", buy_sendlink))
         application.add_handler(CommandHandler("help", help_command))
 
         application.add_error_handler(error_handler)
